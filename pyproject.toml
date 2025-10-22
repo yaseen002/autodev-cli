@@ -1,7 +1,6 @@
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
 [project]
 name = "autodev"
 version = "0.1.0"
@@ -10,8 +9,7 @@ authors = [{ name = "Your Name", email = "your.email@example.com" }]
 dependencies = [
     "typer>=0.19.2",
     "rich>=14.2.0",
+    "gitpython>=3.1.45",
 ]
-
 [project.scripts]
 autodev = "autodev.main:app"
-   

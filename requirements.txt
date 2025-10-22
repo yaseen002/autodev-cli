@@ -1,8 +1,17 @@
-click==8.3.0
+-e git+https://github.com/yaseen002/autodev-cli.git@54db9af7415fe86668086b511a093299e6bfb8d7#egg=autodev
+click==8.1.8
+gitdb==4.0.12
+GitPython==3.1.45
+hatchling==1.27.0
 markdown-it-py==4.0.0
 mdurl==0.1.2
+packaging==25.0
+pathspec==0.12.1
+pluggy==1.6.0
 Pygments==2.19.2
 rich==14.2.0
 shellingham==1.5.4
+smmap==5.0.2
+trove-classifiers==2025.9.11.17
 typer==0.19.2
 typing_extensions==4.15.0
