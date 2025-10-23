@@ -1,30 +1,21 @@
 import typer
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from pathlib import Path
-import git
-import time                     # <-- NEW
-from .templates import (
-    README_TEMPLATE,
-    GITIGNORE_TEMPLATE,
-    REQUIREMENTS_TEMPLATE,
-    MAIN_PY_TEMPLATE,
-    TEST_INIT_TEMPLATE,
-    TEST_MAIN_TEMPLATE,
-    MIT_LICENSE_TEMPLATE,
+from .core.project import create_project_files
+from .core.git_ops import init_and_commit
+from .core.github import create_github_repo, push_to_github
+from .ui.output import (
+    show_spinner, show_command_panel, show_created_table,
+    show_optional_actions, show_success, show_git_success
 )
 
-console = Console()
 app = typer.Typer()
-
 
 @app.command()
 def greet(name: str):
-    """Say hello to someone with style"""
-    console.print(f"Hello, [bold green]{name}[/bold green]! Welcome to AutoDev")
-
+    """Say hello to someone with style 😎"""
+    from rich.console import Console
+    console = Console()
+    console.print(f"👋 Hello, [bold green]{name}[/bold green]! Welcome to AutoDev 🚀")
 
 @app.command()
 def new(
@@ -32,127 +23,77 @@ def new(
     include_tests: bool = typer.Option(False, "--include-tests", help="Include a tests directory"),
     license: str = typer.Option(None, "--license", help="Add a license file (e.g., MIT)"),
     git_flag: bool = typer.Option(False, "--git", help="Initialize Git repository and commit files"),
+    github: bool = typer.Option(False, "--github", help="Create GitHub repo and push code"),
 ):
     """Create a new project with the given name."""
     try:
-        # ---------- Build command string ----------
-        command = f"autodev new {project_name}"
-        if include_tests:
-            command += " --include-tests"
-        if license:
-            command += f" --license {license}"
-        if git_flag:
-            command += " --git"
+        # Build command string
+        cmd_parts = [f"autodev new {project_name}"]
+        if include_tests: cmd_parts.append("--include-tests")
+        if license: cmd_parts.append(f"--license {license}")
+        if git_flag: cmd_parts.append("--git")
+        if github: cmd_parts.append("--github")
+        command = " ".join(cmd_parts)
 
-        # ---------- Validate ----------
+        # Validate
         if not project_name.strip():
-            console.print("[bold red]Error:[/bold red] Project name cannot be empty.")
+            from rich.console import Console
+            Console().print("[bold red]Error:[/bold red] Project name cannot be empty.")
             raise typer.Exit(code=1)
         if any(c in project_name for c in r'<>:"/\|?*'):
-            console.print("[bold red]Error:[/bold red] Invalid characters in project name.")
+            from rich.console import Console
+            Console().print("[bold red]Error:[/bold red] Invalid characters in project name.")
             raise typer.Exit(code=1)
 
         project_dir = Path(project_name).resolve()
         if project_dir.exists():
-            console.print(f"[bold red]Error:[/bold red] Directory '{project_name}' already exists.")
+            from rich.console import Console
+            Console().print(f"[bold red]Error:[/bold red] Directory '{project_name}' already exists.")
             raise typer.Exit(code=1)
 
-        # ---------- 1. Loading spinner ----------
-        created_items = []
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            transient=True,
-        ) as progress:
-            task = progress.add_task("[cyan]Creating project files…", total=None)
+        # 1. Create files (with spinner)
+        show_spinner()
+        items = create_project_files(project_dir, project_name, include_tests, license)
 
-            project_dir.mkdir(parents=True, exist_ok=False)
-            created_items.append(("Directory", str(project_dir)))
+        # 2. Show output
+        show_command_panel(command)
+        show_created_table(items)
+        show_optional_actions(include_tests, license)
 
-            (project_dir / "README.md").write_text(README_TEMPLATE.format(project_name=project_name))
-            created_items.append(("README.md", str(project_dir / "README.md")))
-
-            (project_dir / ".gitignore").write_text(GITIGNORE_TEMPLATE)
-            created_items.append((".gitignore", str(project_dir / ".gitignore")))
-
-            (project_dir / "requirements.txt").write_text(REQUIREMENTS_TEMPLATE)
-            created_items.append(("requirements.txt", str(project_dir / "requirements.txt")))
-
-            (project_dir / "main.py").write_text(MAIN_PY_TEMPLATE.format(project_name=project_name))
-            created_items.append(("main.py", str(project_dir / "main.py")))
-
-            if include_tests:
-                (project_dir / "tests").mkdir()
-                created_items.append(("Directory", str(project_dir / "tests")))
-                (project_dir / "tests" / "__init__.py").write_text(TEST_INIT_TEMPLATE)
-                created_items.append(("tests/__init__.py", str(project_dir / "tests" / "__init__.py")))
-                (project_dir / "tests" / "test_main.py").write_text(TEST_MAIN_TEMPLATE)
-                created_items.append(("tests/test_main.py", str(project_dir / "tests" / "test_main.py")))
-
-            if license and license.upper() == "MIT":
-                (project_dir / "LICENSE").write_text(MIT_LICENSE_TEMPLATE.format(year=2025))
-                created_items.append(("LICENSE", str(project_dir / "LICENSE")))
-
-            progress.update(task, completed=True)
-
-        # tiny pause – feels professional
-        time.sleep(0.3)
-
-        # ---------- 2. Show command & table ----------
-        console.print(Panel(f"[bold blue]Executing:[/bold blue] {command}", border_style="blue"))
-        time.sleep(0.3)
-
-        table = Table(title="Created Items", show_header=True, header_style="bold magenta")
-        table.add_column("Item", style="cyan")
-        table.add_column("Path", style="green")
-        for name, path in created_items:
-            table.add_row(name, path)
-        console.print(table)
-        time.sleep(0.3)
-
-        # ---------- 3. Optional actions ----------
-        if include_tests:
-            console.print("[bold cyan]Checkmark Added tests directory (`tests/`).")
-            time.sleep(0.3)
-        if license and license.upper() == "MIT":
-            console.print("[bold cyan]Checkmark Added MIT license (`LICENSE`).")
-            time.sleep(0.3)
-
-        # ---------- 4. Git ----------
-        git_status = ""
+        # 3. Git (if flagged)
+        git_msg = ""
         if git_flag:
-            try:
-                repo = git.Repo.init(project_dir)
-                repo.index.add([str(p) for p in project_dir.iterdir() if p.name != ".git"])
-                commit_msg = "Initial commit: Project setup with AutoDev CLI"
-                repo.index.commit(commit_msg)
+            success = init_and_commit(project_dir)
+            if success:
+                git_msg = "Initialized repository and committed with message 'Initial commit: Project setup with AutoDev CLI'."
+                show_git_success(git_msg)
 
-                console.print("\n[bold cyan]Git commands executed:[/bold cyan]")
-                console.print("  git init")
-                console.print("  git add .")
-                console.print(f'  git commit -m "{commit_msg}"')
-                time.sleep(0.3)
+        # 4. GitHub (if flagged)
+        if github:
+            if not git_flag:
+                from rich.console import Console
+                console = Console()
+                console.print("[bold yellow]Warning:[/bold yellow] --github requires --git. Enabling local repo init...")
+                init_and_commit(project_dir)
+            remote_url = create_github_repo(project_name)
+            if remote_url:
+                push_to_github(project_dir, remote_url)
 
-                git_status = f"Initialized repository and committed with message '{commit_msg}'."
-            except Exception as e:
-                console.print(f"[bold yellow]Warning:[/bold yellow] Git init failed: {e}")
-                console.print("    Files were created – run `git init` manually later.")
-                git_status = ""
-
-        # ---------- 5. Final success ----------
-        console.print(f"\n[bold green]Success:[/bold green] Created project '{project_name}' with default files.")
-        if git_status:
-            console.print(f"[bold green]Git:[/bold green] {git_status}")
+        # 5. Final success
+        show_success(project_name)
+        if git_msg and not github:
+            show_git_success(git_msg)
 
     except typer.Exit:
         raise
     except PermissionError:
-        console.print("[bold red]Error:[/bold red] Permission denied while creating files.")
+        from rich.console import Console
+        Console().print("[bold red]Error:[/bold red] Permission denied while creating files.")
         raise typer.Exit(code=1)
     except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] Unexpected error: {e}")
+        from rich.console import Console
+        Console().print(f"[bold red]Error:[/bold red] Unexpected error: {e}")
         raise typer.Exit(code=1)
-
 
 if __name__ == "__main__":
     app()
